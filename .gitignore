@@ -1,0 +1,38 @@
+# Directorios de herramientas, agentes y cachés
+.21st/
+.agent/
+.agents/
+.pytest_cache/
+__pycache__/
+design-system/
+docs/
+pylontech-docs/
+shots/
+tests/
+victron-docs/
+
+# Multimedia de campañas que no pertenece al sitio web
+assets/audio/
+assets/video/campana_delta_financiamiento_16x9.mp4
+assets/video/campana_delta_financiamiento_9x16.mp4
+
+# Documentos, presentaciones, scripts y prototipos sueltos en raíz
+*.pdf
+*.docx
+*.pptx
+*.py
+render_deck_snapshots.js
+render_motion_graphics_pro.js
+test_app_runtime.js
+CAMPANA_FINANCIAMIENTO_DELTA_60S.md
+ORIGINAL_REQUEST.md
+TEST_INFRA.md
+TEST_READY.md
+Delta Versión Luciano..html
+presentacion-caso-delta-dedalo.html
+storyboard-video.html
+
+# Archivos del sistema / editor
+.DS_Store
+Thumbs.db
+*.log
