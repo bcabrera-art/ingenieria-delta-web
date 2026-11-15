@@ -1084,6 +1084,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultStatusEl = document.getElementById('result-status');
     const resultTextEl = document.getElementById('result-text');
     const waLinkEl = document.getElementById('wa-link');
+    const pdfProposalLinkEl = document.getElementById('pdf-proposal-link');
     const mailtoLinkEl = document.getElementById('mailto-link');
     const submitBtn = document.getElementById('q-submit-btn');
     const submitText = document.getElementById('q-submit-text');
@@ -1435,11 +1436,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (submitBtn && submitText) {
         submitBtn.disabled = true;
-        submitText.textContent = 'Enviando solicitud...';
+        submitText.textContent = 'Generando propuesta técnica...';
+      }
+      if (pdfProposalLinkEl) {
+        pdfProposalLinkEl.hidden = true;
+        pdfProposalLinkEl.href = '#';
       }
 
+      const resolveEngineUrl = () => {
+        try {
+          const searchStr = typeof window !== 'undefined' && window.location ? window.location.search : '';
+          const urlParams = new URLSearchParams(searchStr);
+          const paramEngine = urlParams.get('engine');
+          if (paramEngine) {
+            try {
+              window.localStorage.setItem('DELTA_ENGINE_URL', paramEngine);
+            } catch (_) {}
+            return paramEngine.replace(/\/+$/, '');
+          }
+          const storedEngine = window.localStorage ? window.localStorage.getItem('DELTA_ENGINE_URL') : null;
+          return (
+            window.DELTA_ENGINE_URL ||
+            storedEngine ||
+            'http://127.0.0.1:8000'
+          ).replace(/\/+$/, '');
+        } catch (_) {
+          return 'http://127.0.0.1:8000';
+        }
+      };
+
+      const fileToBase64 = (file) =>
+        new Promise((resolve) => {
+          if (!file || typeof FileReader === 'undefined') {
+            resolve(null);
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => {
+            const raw = String(reader.result || '');
+            const commaIdx = raw.indexOf(',');
+            resolve(commaIdx >= 0 ? raw.slice(commaIdx + 1) : raw);
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(file);
+        });
+
+      const engineUrl = resolveEngineUrl();
       let emailSent = false;
       let phpSent = false;
+      let agentData = null;
       const subject = `Nueva Cotización Web [${lead.lead_ref}] - ${lead.nombre} (${lead.ubicacion}) | Ingeniería Delta`;
 
       try {
@@ -1477,6 +1522,69 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } catch (_) {}
 
+      if (!phpSent && !honeypot) {
+        try {
+          const engineAttachments = [];
+          if (boletaPdfFile) {
+            const b64 = await fileToBase64(boletaPdfFile);
+            if (b64) {
+              engineAttachments.push({
+                filename: boletaPdfFile.name,
+                mime_type: boletaPdfFile.type || 'application/pdf',
+                content_base64: b64
+              });
+            }
+          }
+          if (fotoGenFile) {
+            const b64 = await fileToBase64(fotoGenFile);
+            if (b64) {
+              engineAttachments.push({
+                filename: fotoGenFile.name,
+                mime_type: fotoGenFile.type || 'image/jpeg',
+                content_base64: b64
+              });
+            }
+          }
+
+          const engineRes = await fetch(`${engineUrl}/api/v1/leads/ingest`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              lead_ref: lead.lead_ref,
+              nombre: lead.nombre,
+              empresa: lead.empresa,
+              correo: lead.correo,
+              telefono: lead.telefono,
+              ubicacion: lead.ubicacion,
+              zona_climatica: simState.zone,
+              linea: lead.linea || 'red',
+              consumo: lead.consumo,
+              consumo_mensual_clp: qState.attachedSimSummary || !lead.consumo ? simState.monthlyBillClp : null,
+              potencia_generador: lead.potencia_generador,
+              fase_generador: lead.fase_generador,
+              tipo: lead.tipo,
+              origen: typeof window !== 'undefined' && window.location && window.location.hostname
+                ? window.location.hostname
+                : 'new.ingenieriadelta.cl',
+              servicios: lead.servicios,
+              simulacion: lead.simulacion,
+              mensaje: lead.mensaje,
+              incluye_baterias: Boolean(simState.includeBatteryAddon),
+              interested_in_zero_down_long_term: simState.financingMode === 'financiado',
+              preferred_term_years: Number(simState.financingTerm || 25),
+              attachments: engineAttachments,
+              send_whatsapp_immediately: true
+            })
+          });
+          if (engineRes.ok) {
+            const parsedEngine = await engineRes.json();
+            if (parsedEngine && parsedEngine.ok) {
+              agentData = parsedEngine;
+            }
+          }
+        } catch (_) {}
+      }
+
       if (!emailSent && !honeypot) {
         try {
           const fsRes = await fetch('https://formsubmit.co/ajax/bcabrera@ingenieriadelta.cl', {
@@ -1510,14 +1618,25 @@ document.addEventListener('DOMContentLoaded', () => {
         subject
       )}&body=${encodeURIComponent(out.text)}`;
 
+      if (agentData && agentData.inspector_approved && pdfProposalLinkEl) {
+        const cleanRef = String(agentData.lead_ref || lead.lead_ref).replace(/^#/, '');
+        pdfProposalLinkEl.href = `${engineUrl}/api/v1/proposals/${encodeURIComponent(cleanRef)}/pdf`;
+        pdfProposalLinkEl.hidden = false;
+      }
+
       if (resultStatusEl) {
         const hasAttachment = Boolean(boletaPdfFile || fotoGenFile);
         const attachmentName = boletaPdfFile ? boletaPdfFile.name : fotoGenFile ? fotoGenFile.name : '';
-        let statusMsg = emailSent
-          ? `Solicitud enviada a bcabrera@ingenieriadelta.cl y cdiaz@ingenieriadelta.cl. Si prefieres agilizar la respuesta, envíanos también el resumen por WhatsApp.`
-          : `Tu resumen está listo. Puedes enviarlo directamente por WhatsApp o abrirlo en tu cliente de correo hacia bcabrera@ingenieriadelta.cl y cdiaz@ingenieriadelta.cl.`;
-        if (hasAttachment && !phpSent) {
-          statusMsg += ` Recuerda adjuntar el archivo "${attachmentName}" directamente al enviar por WhatsApp o correo.`;
+        let statusMsg = '';
+        if (agentData && agentData.inspector_approved) {
+          statusMsg = `Propuesta Técnica Preliminar No Vinculante (${agentData.lead_ref || lead.lead_ref}) generada y auditada por nuestros 4 Agentes Especializados. Ya puedes descargar el PDF oficial aquí abajo o enviarnos el resumen por WhatsApp.`;
+        } else {
+          statusMsg = emailSent
+            ? `Solicitud enviada a bcabrera@ingenieriadelta.cl y cdiaz@ingenieriadelta.cl. Si prefieres agilizar la respuesta, envíanos también el resumen por WhatsApp.`
+            : `Tu resumen está listo. Puedes enviarlo directamente por WhatsApp o abrirlo en tu cliente de correo hacia bcabrera@ingenieriadelta.cl y cdiaz@ingenieriadelta.cl.`;
+          if (hasAttachment && !phpSent) {
+            statusMsg += ` Recuerda adjuntar el archivo "${attachmentName}" directamente al enviar por WhatsApp o correo.`;
+          }
         }
         resultStatusEl.textContent = statusMsg;
       }

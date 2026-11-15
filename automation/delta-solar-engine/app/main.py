@@ -12,10 +12,12 @@ Expone endpoints REST para:
 from __future__ import annotations
 
 import base64
+import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -36,6 +38,25 @@ app = FastAPI(
     ),
     version="2.0.0",
 )
+
+_cors_kwargs: Dict[str, Any] = {
+    "allow_origins": ["*"],
+    "allow_credentials": False,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if "allow_private_network" in inspect.signature(CORSMiddleware.__init__).parameters:
+    _cors_kwargs["allow_private_network"] = True
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
+
+
+@app.middleware("http")
+async def allow_private_network_access(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("Access-Control-Allow-Private-Network", "true")
+    return response
+
 
 db = DeltaCRMDatabase()
 wa_gateway = WhatsAppGateway()
