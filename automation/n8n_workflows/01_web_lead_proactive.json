@@ -1,0 +1,189 @@
+{
+  "name": "01 - Delta Aysén: Ingesta Web + Pipeline 4 Agentes + Envío Proactivo (2 min)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "delta-web-lead",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-webhook-web",
+      "name": "Webhook enviar.php",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://delta-solar-engine:8000/api/v1/leads/ingest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body || $json) }}",
+        "options": {}
+      },
+      "id": "node-run-4-agents",
+      "name": "Ejecutar Pipeline 4 Agentes (Comercial -> BOQ -> Precios -> Inspector QA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "CRM_LEADS_INGENIERIA_DELTA",
+          "mode": "name"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Embudo_Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Expediente": "={{ $json.lead_ref }}",
+            "Nombre": "={{ $json.expediente.nombre }}",
+            "Telefono": "={{ $json.expediente.telefono }}",
+            "Correo": "={{ $json.expediente.correo }}",
+            "Localidad": "={{ $json.expediente.ubicacion }}",
+            "Linea": "={{ $json.expediente.linea }}",
+            "Etapa_Embudo": "={{ $json.expediente.etapa_embudo }}",
+            "Interes_Dedalo_Pie0": "={{ $json.expediente.dedalo_kyc.interested_in_zero_down_long_term }}",
+            "Potencia_kWp": "={{ $json.engineering_boq.total_kwp }}",
+            "Costo_Equipos_Neto": "={{ $json.pricing_quote.costo_equipos_y_ferreteria_neto_clp }}",
+            "Logistica_Aysen_9pct": "={{ $json.pricing_quote.costo_logistica_aysen_9_pct_clp }}",
+            "Costo_Instalacion_Subcontrato": "={{ $json.pricing_quote.costo_instalacion_subcontrato_neto_clp }}",
+            "Utilidad_Delta_20pct": "={{ $json.pricing_quote.utilidad_total_delta_neto_clp }}",
+            "Precio_Final_Neto_Cliente": "={{ $json.pricing_quote.precio_final_neto_cliente_clp }}",
+            "QA_Inspector_Aprobado": "={{ $json.inspector_approved }}"
+          },
+          "matchingColumns": ["Expediente"]
+        }
+      },
+      "id": "node-gsheets-crm",
+      "name": "Guardar Expediente y Costos en Google Sheets CRM (bcabrera@ingenieriadelta.cl)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "id": "node-wait-2min",
+      "name": "Esperar 2 Minutos (Ventana para clic en wa.me)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://delta-solar-engine:8000/api/v1/leads/lookup?q={{ encodeURIComponent($node[\"Ejecutar Pipeline 4 Agentes (Comercial -> BOQ -> Precios -> Inspector QA)\"].json.lead_ref) }}",
+        "options": {}
+      },
+      "id": "node-check-wa-contact",
+      "name": "Verificar si Cliente ya Escribió por WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-not-contacted",
+              "leftValue": "={{ $json.wa_contacted }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-qa-approved",
+              "leftValue": "={{ $json.inspector_approved }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-not-paused",
+              "leftValue": "={{ $json.bot_paused }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-if-proactive",
+      "name": "¿Enviar Propuesta Proactiva por WhatsApp?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://evolution-api:8080/message/sendMedia/delta_aysen",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.EVOLUTION_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.phone.replace('+',''), mediatype: 'document', mimetype: 'application/pdf', fileName: $json.pdf_filename, caption: $json.state.commercial_presentation_message, media: $json.pdf_base64 }) }}"
+      },
+      "id": "node-send-wa-proactive",
+      "name": "Agente 1 (Comercial): Enviar Propuesta PDF Proactiva por WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 220]
+    }
+  ],
+  "connections": {
+    "Webhook enviar.php": {
+      "main": [[{ "node": "Ejecutar Pipeline 4 Agentes (Comercial -> BOQ -> Precios -> Inspector QA)", "type": "main", "index": 0 }]]
+    },
+    "Ejecutar Pipeline 4 Agentes (Comercial -> BOQ -> Precios -> Inspector QA)": {
+      "main": [[{ "node": "Guardar Expediente y Costos en Google Sheets CRM (bcabrera@ingenieriadelta.cl)", "type": "main", "index": 0 }]]
+    },
+    "Guardar Expediente y Costos en Google Sheets CRM (bcabrera@ingenieriadelta.cl)": {
+      "main": [[{ "node": "Esperar 2 Minutos (Ventana para clic en wa.me)", "type": "main", "index": 0 }]]
+    },
+    "Esperar 2 Minutos (Ventana para clic en wa.me)": {
+      "main": [[{ "node": "Verificar si Cliente ya Escribió por WhatsApp", "type": "main", "index": 0 }]]
+    },
+    "Verificar si Cliente ya Escribió por WhatsApp": {
+      "main": [[{ "node": "¿Enviar Propuesta Proactiva por WhatsApp?", "type": "main", "index": 0 }]]
+    },
+    "¿Enviar Propuesta Proactiva por WhatsApp?": {
+      "main": [
+        [{ "node": "Agente 1 (Comercial): Enviar Propuesta PDF Proactiva por WhatsApp", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  }
+}

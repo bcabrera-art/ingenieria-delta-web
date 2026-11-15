@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  delta-solar-engine:
+    build:
+      context: ./delta-solar-engine
+      dockerfile: Dockerfile
+    container_name: delta-solar-engine
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./delta-solar-engine/data:/app/data
+      - ./delta-solar-engine/generated_proposals:/app/generated_proposals
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: delta-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=America/Santiago
+      - TZ=America/Santiago
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - DELTA_ENGINE_URL=http://delta-solar-engine:8000
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n_workflows:/workflows:ro
+    depends_on:
+      - delta-solar-engine
+
+  evolution-api:
+    image: atendai/evolution-api:v2.1.1
+    container_name: delta-evolution-whatsapp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - evolution_instances:/evolution/instances
+
+volumes:
+  n8n_data:
+  evolution_instances:

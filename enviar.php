@@ -42,6 +42,10 @@ $cleanInline = static function ($value): string {
 };
 
 $nombre            = $cleanInline($data['nombre'] ?? '');
+$leadRef           = $cleanInline($data['lead_ref'] ?? '');
+if ($leadRef === '') {
+    $leadRef = '#DLT-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 5));
+}
 $empresa           = $cleanInline($data['empresa'] ?? 'Particular / Hogar');
 $correo            = filter_var(trim(str_replace(["\r", "\n"], '', (string)($data['correo'] ?? ''))), FILTER_SANITIZE_EMAIL);
 $telefono          = $cleanInline($data['telefono'] ?? '');
@@ -146,11 +150,12 @@ if (isset($_FILES['foto_generador']) && ($_FILES['foto_generador']['error'] ?? U
 
 // Destinatarios oficiales de Ingeniería Delta
 $destinatarios = 'bcabrera@ingenieriadelta.cl, cdiaz@ingenieriadelta.cl';
-$asunto = "Nueva Cotización Web - $nombre ($ubicacion) | Ingeniería Delta";
+$asunto = "Nueva Cotización Web [$leadRef] - $nombre ($ubicacion) | Ingeniería Delta";
 
 $cuerpo = "========================================================\n";
 $cuerpo .= " NUEVA SOLICITUD DE COTIZACIÓN - INGENIERIADELTA.CL\n";
 $cuerpo .= "========================================================\n\n";
+$cuerpo .= "Ref. Expediente : $leadRef\n";
 $cuerpo .= "Nombre completo : $nombre\n";
 $cuerpo .= "Tipo / Empresa  : $empresa\n";
 $cuerpo .= "Correo          : $correo\n";
@@ -212,9 +217,67 @@ if (empty($attachments)) {
 
 $enviado = @mail($destinatarios, '=?UTF-8?B?' . base64_encode($asunto) . '?=', $mailBody, implode("\r\n", $headers));
 
-if ($enviado) {
+// Reenvío asíncrono / no bloqueante al Orquestador Multi-Agente (Agente 1 -> 2 -> 3 -> 4)
+$webhookUrl = getenv('DELTA_AGENT_WEBHOOK_URL') ?: 'http://127.0.0.1:8000/api/v1/leads/ingest';
+$webhookSecret = getenv('DELTA_WEBHOOK_SECRET') ?: 'delta-aysen-secret-2026';
+$agentTriggered = false;
+
+if (!empty($webhookUrl) && function_exists('curl_init')) {
+    $webhookAttachments = [];
+    foreach ($attachments as $att) {
+        $webhookAttachments[] = [
+            'filename'       => $att['filename'],
+            'mime_type'      => $att['mime'],
+            'content_base64' => base64_encode($att['content']),
+        ];
+    }
+    $webhookPayload = json_encode([
+        'lead_ref'           => $leadRef,
+        'nombre'             => $nombre,
+        'empresa'            => $empresa,
+        'correo'             => $correo,
+        'telefono'           => $telefono,
+        'ubicacion'          => $ubicacion,
+        'linea'              => $linea ?: 'red',
+        'consumo'            => $consumo,
+        'potencia_generador' => $potenciaGenerador,
+        'fase_generador'     => $faseGenerador,
+        'tipo'               => $tipo,
+        'origen'             => $origen,
+        'servicios'          => is_array($servicios) ? array_values($servicios) : [$serviciosStr],
+        'simulacion'         => $simulacion,
+        'mensaje'            => $mensaje,
+        'attachments'        => $webhookAttachments,
+        'submitted_at'       => date('c'),
+    ], JSON_UNESCAPED_UNICODE);
+
+    $ch = @curl_init($webhookUrl);
+    if ($ch !== false && is_string($webhookPayload)) {
+        @curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $webhookPayload,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/json; charset=utf-8',
+                'X-Delta-Webhook-Secret: ' . $webhookSecret,
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_TIMEOUT        => 4,
+        ]);
+        $whResp = @curl_exec($ch);
+        $whCode = (int)@curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        @curl_close($ch);
+        if ($whCode >= 200 && $whCode < 300) {
+            $agentTriggered = true;
+        }
+    }
+}
+
+if ($enviado || $agentTriggered) {
     echo json_encode([
         'ok' => true,
+        'lead_ref' => $leadRef,
+        'agent_triggered' => $agentTriggered,
         'attachments' => count($attachments),
         'message' => 'Tu solicitud fue enviada directamente a bcabrera@ingenieriadelta.cl y cdiaz@ingenieriadelta.cl.'
     ]);
@@ -223,6 +286,7 @@ if ($enviado) {
     http_response_code(202);
     echo json_encode([
         'ok' => false,
+        'lead_ref' => $leadRef,
         'fallback' => true,
         'message' => 'Usando pasarela de correo en la nube de respaldo.'
     ]);

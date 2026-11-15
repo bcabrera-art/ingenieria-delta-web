@@ -17,10 +17,15 @@ assets/video/campana_delta_financiamiento_16x9.mp4
 assets/video/campana_delta_financiamiento_9x16.mp4
 
 # Documentos, presentaciones, scripts y prototipos sueltos en raíz
-*.pdf
+/*.pdf
 *.docx
 *.pptx
-*.py
+/*.py
+
+# Artefactos de ejecución local en automation/
+automation/.env
+automation/delta-solar-engine/data/*.sqlite3
+automation/delta-solar-engine/generated_proposals/
 render_deck_snapshots.js
 render_motion_graphics_pro.js
 test_app_runtime.js

@@ -1,0 +1,121 @@
+{
+  "name": "02 - Delta Aysén: Orquestador WhatsApp 4 Agentes + Agendamiento Google Calendar",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "delta-whatsapp-inbound",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-wa-webhook",
+      "name": "Webhook WhatsApp (Evolution API / Meta Cloud)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-from-me",
+              "leftValue": "={{ Boolean($json.body?.data?.key?.fromMe) }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-check-human-takeover",
+      "name": "¿Intervención Humana desde Celular (fromMe)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://delta-solar-engine:8000/api/v1/leads/handoff",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $json.body?.data?.key?.remoteJid || '', paused: true, reason: 'human_takeover_from_phone' }) }}"
+      },
+      "id": "node-pause-bot",
+      "name": "Pausar Bot en esta Conversación (Human Handoff)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 180]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://delta-solar-engine:8000/api/v1/leads/lookup?q={{ encodeURIComponent(($json.body?.data?.message?.conversation || '').match(/#DLT-[A-Z0-9]+/)?.[0] || $json.body?.data?.key?.remoteJid || '') }}&mark_contacted=true"
+      },
+      "id": "node-lookup-lead",
+      "name": "Cruzar con Expediente Web (#DLT-XXXX o Teléfono)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://delta-solar-engine:8000/api/v1/leads/ingest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ nombre: $node[\"Webhook WhatsApp (Evolution API / Meta Cloud)\"].json.body?.data?.pushName || 'Cliente WhatsApp', telefono: $node[\"Webhook WhatsApp (Evolution API / Meta Cloud)\"].json.body?.data?.key?.remoteJid || '', mensaje: $node[\"Webhook WhatsApp (Evolution API / Meta Cloud)\"].json.body?.data?.message?.conversation || '', send_whatsapp_immediately: true }) }}"
+      },
+      "id": "node-run-4-agents-wa",
+      "name": "Ejecutar Squad 4 Agentes (Comercial -> Solution Engineer -> Cotizador -> Inspector QA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 440]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "bcabrera@ingenieriadelta.cl",
+          "mode": "id"
+        },
+        "start": "={{ $json.available_calendar_slots?.[0]?.start_iso }}",
+        "end": "={{ $json.available_calendar_slots?.[0]?.end_iso }}",
+        "additionalFields": {
+          "summary": "={{ '[Ingeniería Delta] Reunión Técnica 30 min - ' + $json.expediente.nombre + ' (' + $json.lead_ref + ')' }}",
+          "description": "={{ 'Propuesta No Vinculante: ' + $json.engineering_boq.system_title + ' | Precio Final Neto: $' + $json.pricing_quote.precio_final_neto_cliente_clp }}",
+          "attendees": ["={{ $json.expediente.correo }}"],
+          "conferenceDataUi": {
+            "conferenceDataValues": {
+              "conferenceSolution": "hangoutsMeet"
+            }
+          }
+        }
+      },
+      "id": "node-gcal-book",
+      "name": "Tool: Agendar Reunión 30m en Calendar bcabrera@ingenieriadelta.cl",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [1340, 440]
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp (Evolution API / Meta Cloud)": {
+      "main": [[{ "node": "¿Intervención Humana desde Celular (fromMe)?", "type": "main", "index": 0 }]]
+    },
+    "¿Intervención Humana desde Celular (fromMe)?": {
+      "main": [
+        [{ "node": "Pausar Bot en esta Conversación (Human Handoff)", "type": "main", "index": 0 }],
+        [{ "node": "Cruzar con Expediente Web (#DLT-XXXX o Teléfono)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Cruzar con Expediente Web (#DLT-XXXX o Teléfono)": {
+      "main": [[{ "node": "Ejecutar Squad 4 Agentes (Comercial -> Solution Engineer -> Cotizador -> Inspector QA)", "type": "main", "index": 0 }]]
+    },
+    "Ejecutar Squad 4 Agentes (Comercial -> Solution Engineer -> Cotizador -> Inspector QA)": {
+      "main": [[{ "node": "Tool: Agendar Reunión 30m en Calendar bcabrera@ingenieriadelta.cl", "type": "main", "index": 0 }]]
+    }
+  }
+}

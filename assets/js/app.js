@@ -21,10 +21,23 @@ const LINEAS_LABEL = {
 };
 
 window.DeltaLeads = (function () {
+  function generateRef() {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let code = '';
+    for (let i = 0; i < 5; i += 1) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return '#DLT-' + code;
+  }
+
   function toMessage(lead) {
+    if (lead && !lead.lead_ref) {
+      lead.lead_ref = generateRef();
+    }
     const lines = [
       'Hola Benjamín y Carlos (Ingeniería Delta), les escribo por un proyecto solar:',
       '',
+      '- Ref. Expediente: ' + (lead.lead_ref || '#DLT-WEB'),
       '- Nombre: ' + (lead.nombre || 'Por confirmar'),
       '- Correo: ' + (lead.correo || 'Por confirmar'),
       '- Teléfono / WhatsApp: ' + (lead.telefono || 'Por confirmar'),
@@ -74,7 +87,7 @@ window.DeltaLeads = (function () {
     return false;
   }
 
-  return { submit, open, toMessage, whatsappUrl };
+  return { submit, open, toMessage, whatsappUrl, generateRef };
 })();
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1395,7 +1408,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const fotoGenFile = qState.linea === 'diesel' ? qState.fotoGenFile : null;
 
       const simulacionTexto = qState.attachedSimSummary || 'Evaluación general sin parámetros del simulador';
+      const leadRef =
+        window.DeltaLeads && typeof window.DeltaLeads.generateRef === 'function'
+          ? window.DeltaLeads.generateRef()
+          : '#DLT-' + Math.random().toString(36).substring(2, 7).toUpperCase();
       const lead = {
+        lead_ref: leadRef,
         linea: qState.linea,
         consumo,
         potencia_generador: potenciaGenerador,
@@ -1422,10 +1440,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let emailSent = false;
       let phpSent = false;
-      const subject = `Nueva Cotización Web - ${lead.nombre} (${lead.ubicacion}) | Ingeniería Delta`;
+      const subject = `Nueva Cotización Web [${lead.lead_ref}] - ${lead.nombre} (${lead.ubicacion}) | Ingeniería Delta`;
 
       try {
         const formData = new FormData();
+        formData.append('lead_ref', lead.lead_ref);
         formData.append('linea', lead.linea || '');
         formData.append('consumo', lead.consumo || '');
         formData.append('potencia_generador', lead.potencia_generador || '');
